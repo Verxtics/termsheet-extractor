@@ -2,7 +2,6 @@ import streamlit as st
 import tempfile
 import os
 import pandas as pd
-from termsheet_extractor import extract_termsheet_data, create_professional_excel_output
 
 st.set_page_config(
     page_title="Termsheet Data Extractor",
@@ -91,3 +90,4 @@ if uploaded_file is not None:
 
 st.markdown("---")
 st.caption("Professional termsheet extraction for structured products")
+
