@@ -90,4 +90,5 @@ if uploaded_file is not None:
         os.unlink(tmp_path)
 
 st.markdown("---")
+
 st.caption("Professional termsheet extraction for structured products")
