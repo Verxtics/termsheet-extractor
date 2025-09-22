@@ -862,22 +862,50 @@ def create_database_row(data):
 
     # Extract minimum tenor from termsheet
     extracted_min_tenor = data.get('Minimum_Tenor', '') or data.get('Min_Tenor_Q', '')
-    if extracted_min_tenor and isinstance(extracted_min_tenor, (int, float)):
-        min_tenor = int(extracted_min_tenor)
+    if extracted_min_tenor:
+        try:
+            if isinstance(extracted_min_tenor, (int, float)):
+                min_tenor = int(extracted_min_tenor)
+            elif isinstance(extracted_min_tenor, str) and extracted_min_tenor.strip():
+                # Extract numeric value from string
+                tenor_match = re.search(r'(\d+)', extracted_min_tenor)
+                if tenor_match:
+                    min_tenor = int(tenor_match.group(1))
+                else:
+                    min_tenor = 2  # Fallback
+            else:
+                min_tenor = 2  # Fallback
+        except (ValueError, TypeError):
+            min_tenor = 2  # Fallback
     else:
-        # Extract from text patterns
         min_tenor = 2  # Fallback
 
-    # Get coupon rate and format properly
+    # Get coupon rate and format properly with error handling
     coupon_rate = data.get('Coupon Rate - Annual', '')
-    if isinstance(coupon_rate, (int, float)) and coupon_rate != '':
-        if coupon_rate < 1:  # If it's decimal (0.1352), convert to percentage
-            coupon_qtr_pct = f"{coupon_rate * 100 / 4:.3f}%"  # Quarterly as percentage string
-            coupon_annual_decimal = coupon_rate  # Keep as decimal for Excel percentage formatting
-        else:  # If it's already percentage
-            coupon_qtr_pct = f"{coupon_rate / 4:.3f}%"
-            coupon_annual_decimal = coupon_rate / 100
-    else:
+    coupon_qtr_pct = ''
+    coupon_annual_decimal = ''
+    
+    try:
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate != '':
+            if coupon_rate < 1:  # If it's decimal (0.1352), convert to percentage
+                coupon_qtr_pct = f"{coupon_rate * 100 / 4:.3f}%"  # Quarterly as percentage string
+                coupon_annual_decimal = coupon_rate  # Keep as decimal for Excel percentage formatting
+            else:  # If it's already percentage
+                coupon_qtr_pct = f"{coupon_rate / 4:.3f}%"
+                coupon_annual_decimal = coupon_rate / 100
+        elif isinstance(coupon_rate, str) and coupon_rate.strip():
+            # Try to extract numeric value from string
+            rate_match = re.search(r'(\d+\.?\d*)', coupon_rate.replace('%', ''))
+            if rate_match:
+                rate_value = float(rate_match.group(1))
+                if rate_value < 1:  # Decimal format
+                    coupon_qtr_pct = f"{rate_value * 100 / 4:.3f}%"
+                    coupon_annual_decimal = rate_value
+                else:  # Percentage format
+                    coupon_qtr_pct = f"{rate_value / 4:.3f}%"
+                    coupon_annual_decimal = rate_value / 100
+    except (ValueError, TypeError, AttributeError):
+        # Leave empty if any conversion fails
         coupon_qtr_pct = ''
         coupon_annual_decimal = ''
 
@@ -890,13 +918,49 @@ def create_database_row(data):
     row[5] = coupon_qtr_pct  # Coupon - QTR as percentage string
     row[6] = coupon_annual_decimal  # Coupon Rate - Annual as decimal for Excel formatting
     row[7] = 'Active'
-    row[8] = data.get('Knock-In%', 0.6)  # Knock-In% extracted from termsheet
     
-    # Extract actual Knock-Out% from termsheet data (not hardcoded)
+    # Extract Knock-In% with error handling
+    extracted_knockin = data.get('Knock-In%', '')
+    try:
+        if extracted_knockin and isinstance(extracted_knockin, (int, float)):
+            row[8] = float(extracted_knockin)
+        elif isinstance(extracted_knockin, str) and extracted_knockin.strip():
+            # Try to extract numeric value from string
+            knockin_match = re.search(r'(\d+\.?\d*)', extracted_knockin.replace('%', ''))
+            if knockin_match:
+                knockin_value = float(knockin_match.group(1))
+                # Convert to decimal if it's in percentage format
+                if knockin_value > 1:
+                    row[8] = knockin_value / 100
+                else:
+                    row[8] = knockin_value
+            else:
+                row[8] = 0.6  # Default 60%
+        else:
+            row[8] = 0.6  # Default 60%
+    except (ValueError, TypeError, AttributeError):
+        row[8] = 0.6  # Default 60%
+    
+    # Extract actual Knock-Out% from termsheet data (not hardcoded) with error handling
     extracted_knockout = data.get('Knock-Out%', '')
-    if extracted_knockout and isinstance(extracted_knockout, (int, float)):
-        row[9] = extracted_knockout  # Use actual extracted value
-    else:
+    try:
+        if extracted_knockout and isinstance(extracted_knockout, (int, float)):
+            row[9] = float(extracted_knockout)  # Use actual extracted value
+        elif isinstance(extracted_knockout, str) and extracted_knockout.strip():
+            # Try to extract numeric value from string
+            knockout_match = re.search(r'(\d+\.?\d*)', extracted_knockout.replace('%', ''))
+            if knockout_match:
+                knockout_value = float(knockout_match.group(1))
+                # Convert to decimal if it's in percentage format
+                if knockout_value > 1:
+                    row[9] = knockout_value / 100
+                else:
+                    row[9] = knockout_value
+            else:
+                raise ValueError("No numeric value found")
+        else:
+            raise ValueError("Empty or invalid knockout value")
+    except (ValueError, TypeError, AttributeError):
         # Fallback defaults only if extraction completely fails
         if 'ACE 95%' in product_type:
             row[9] = 0.95  # 95% knock-out for MBL products
@@ -1014,45 +1078,72 @@ def create_database_row(data):
         else:
             row[19 + i] = ''
     
-    # Financial amounts (23-26) - extract actual values from termsheet
+    # Financial amounts (23-26) - extract actual values from termsheet with error handling
     extracted_notional = data.get('Notional Value', '') or data.get('Principal_Amount', '') or data.get('Investment_Amount', '')
     
-    if extracted_notional and isinstance(extracted_notional, (int, float)) and extracted_notional > 0:
-        formatted_amount = f"${extracted_notional:,.2f}"
-        row[23] = formatted_amount  # Investment $
-        row[24] = formatted_amount  # Total Units
-        row[25] = formatted_amount  # Notional Value
-        row[26] = formatted_amount if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
-    else:
+    try:
+        if extracted_notional and isinstance(extracted_notional, (int, float)) and extracted_notional > 0:
+            formatted_amount = f"${extracted_notional:,.2f}"
+            row[23] = formatted_amount  # Investment $
+            row[24] = formatted_amount  # Total Units
+            row[25] = formatted_amount  # Notional Value
+            row[26] = formatted_amount if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
+        elif isinstance(extracted_notional, str) and extracted_notional.strip():
+            # Try to extract numeric value from string
+            amount_match = re.search(r'[\d,]+(?:\.\d{2})?', extracted_notional.replace('$', '').replace(',', ''))
+            if amount_match:
+                amount_value = float(amount_match.group(0).replace(',', ''))
+                if amount_value > 1000:  # Reasonable minimum
+                    formatted_amount = f"${amount_value:,.2f}"
+                    row[23] = formatted_amount
+                    row[24] = formatted_amount
+                    row[25] = formatted_amount
+                    row[26] = formatted_amount if data.get('CCY') == 'AUD' else ''
+                else:
+                    raise ValueError("Amount too small")
+            else:
+                raise ValueError("No numeric amount found")
+        else:
+            raise ValueError("Empty or invalid notional")
+    except (ValueError, TypeError, AttributeError):
         # Try to extract from text patterns if structured extraction failed
         extracted_text = data.get('extracted_text', '')
-        notional_patterns = [
-            r'Principal[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            r'Notional[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            r'Investment[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
-            r'Amount[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)'
-        ]
-        
-        found_amount = None
-        for pattern in notional_patterns:
-            match = re.search(pattern, extracted_text, re.IGNORECASE)
-            if match:
-                amount_str = match.group(1).replace(',', '')
+        if extracted_text:
+            notional_patterns = [
+                r'Principal[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+                r'Notional[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+                r'Investment[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+                r'Amount[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)'
+            ]
+            
+            found_amount = None
+            for pattern in notional_patterns:
                 try:
-                    found_amount = float(amount_str)
-                    break
-                except:
+                    match = re.search(pattern, extracted_text, re.IGNORECASE)
+                    if match:
+                        amount_str = match.group(1).replace(',', '')
+                        found_amount = float(amount_str)
+                        if found_amount > 1000:  # Reasonable minimum
+                            break
+                except (ValueError, AttributeError):
                     continue
-        
-        if found_amount and found_amount > 1000:  # Reasonable minimum
-            formatted_amount = f"${found_amount:,.2f}"
-            row[23] = formatted_amount
-            row[24] = formatted_amount
-            row[25] = formatted_amount
-            row[26] = formatted_amount if data.get('CCY') == 'AUD' else ''
+            
+            if found_amount and found_amount > 1000:
+                formatted_amount = f"${found_amount:,.2f}"
+                row[23] = formatted_amount
+                row[24] = formatted_amount
+                row[25] = formatted_amount
+                row[26] = formatted_amount if data.get('CCY') == 'AUD' else ''
+            else:
+                # Only use fallback amounts if no extraction possible
+                fallback_amount = "$100,000.00"  # More realistic than $100
+                row[23] = fallback_amount
+                row[24] = fallback_amount
+                row[25] = fallback_amount
+                row[26] = fallback_amount if data.get('CCY') == 'AUD' else ''
         else:
-            # Only use fallback amounts if no extraction possible
-            fallback_amount = "$100,000.00"  # More realistic than $100
+            # No text available - use fallback
+            fallback_amount = "$100,000.00"
             row[23] = fallback_amount
             row[24] = fallback_amount
             row[25] = fallback_amount
@@ -1060,19 +1151,45 @@ def create_database_row(data):
     
     row[27] = data.get('Maturity Date', '')
     
-    # Extract revenue from termsheet if available
+    # Extract revenue from termsheet if available with error handling
     extracted_revenue = data.get('Revenue', '') or data.get('Expected_Return', '') or data.get('Coupon_Payment', '')
-    if extracted_revenue and isinstance(extracted_revenue, (int, float)):
-        row[28] = f"${extracted_revenue:,.2f}"
-    else:
-        row[28] = ''  # Leave empty if not found
+    try:
+        if extracted_revenue and isinstance(extracted_revenue, (int, float)):
+            row[28] = f"${extracted_revenue:,.2f}"
+        elif isinstance(extracted_revenue, str) and extracted_revenue.strip():
+            # Try to extract numeric value from string
+            revenue_match = re.search(r'[\d,]+(?:\.\d{2})?', extracted_revenue.replace('$', ''))
+            if revenue_match:
+                revenue_value = float(revenue_match.group(0).replace(',', ''))
+                row[28] = f"${revenue_value:,.2f}"
+            else:
+                row[28] = ''  # Leave empty if not found
+        else:
+            row[28] = ''  # Leave empty if not found
+    except (ValueError, TypeError, AttributeError):
+        row[28] = ''  # Leave empty if conversion fails
         
-    # Extract UF% from termsheet
+    # Extract UF% from termsheet with error handling
     extracted_uf = data.get('UF%', '') or data.get('Management_Fee', '') or data.get('Fee', '')
-    if extracted_uf and isinstance(extracted_uf, (int, float)):
-        row[29] = extracted_uf
-    else:
-        row[29] = 0.023  # Standard 2.30% only as fallback
+    try:
+        if extracted_uf and isinstance(extracted_uf, (int, float)):
+            row[29] = float(extracted_uf)
+        elif isinstance(extracted_uf, str) and extracted_uf.strip():
+            # Try to extract numeric value from string
+            uf_match = re.search(r'(\d+\.?\d*)', extracted_uf.replace('%', ''))
+            if uf_match:
+                uf_value = float(uf_match.group(1))
+                # Convert to decimal if it's in percentage format
+                if uf_value > 1:
+                    row[29] = uf_value / 100
+                else:
+                    row[29] = uf_value
+            else:
+                row[29] = 0.023  # Standard 2.30% fallback
+        else:
+            row[29] = 0.023  # Standard 2.30% fallback
+    except (ValueError, TypeError, AttributeError):
+        row[29] = 0.023  # Standard 2.30% fallback
     
     # Underlying prices (30-41) - extract actual values from termsheet data
     for i in range(4):
