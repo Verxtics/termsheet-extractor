@@ -853,38 +853,25 @@ def create_database_row(data):
     return row
 
 def append_to_fixed_income_master(new_row_data, master_file_path):
-    """Append new data to your Fixed Income Desk Master File Database sheet"""
-    
     try:
-        # Read the existing file
-        if not os.path.exists(master_file_path):
-            return False, f"Master file not found: {master_file_path}"
-        
-        # Read all sheets to preserve them
-        xl_file = pd.ExcelFile(master_file_path)
-        
-        # Read the Database sheet (note the space)
+        # Read the Database sheet
         database_df = pd.read_excel(master_file_path, sheet_name=' Database', header=0)
         
-        # Add the new row
+        # Add new row
         new_row_df = pd.DataFrame([new_row_data])
         updated_df = pd.concat([database_df, new_row_df], ignore_index=True)
         
-        # Write back to Excel, preserving all sheets
-        with pd.ExcelWriter(master_file_path, engine='openpyxl', mode='w') as writer:
-            # Write all existing sheets
-            for sheet_name in xl_file.sheet_names:
-                if sheet_name == ' Database':
-                    updated_df.to_excel(writer, sheet_name=' Database', index=False, header=False)
-                else:
-                    existing_sheet = pd.read_excel(master_file_path, sheet_name=sheet_name)
-                    existing_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+        # Create output file for download
+        output_path = "Updated_Master_File.xlsx"
+        
+        # Write just the Database sheet to avoid visibility issues
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            updated_df.to_excel(writer, sheet_name=' Database', index=False, header=False)
         
         return True, f"Successfully added row {len(updated_df)} to Database sheet"
         
     except Exception as e:
         return False, f"Error updating master file: {str(e)}"
-
 # Initialize the extractor
 extractor = FixedIncomeTermsheetExtractor()
 
