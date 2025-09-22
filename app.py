@@ -986,15 +986,6 @@ if uploaded_files and os.path.exists(master_path):
                 data['Issuer'] = extractor.issuer_patterns[selected_issuer_key]['issuer_name']
                 data['Source_File'] = file.name
                 
-                # Re-extract with correct patterns
-                issuer_config = extractor.issuer_patterns[selected_issuer_key]
-                corrected_data = extractor.extract_with_patterns(
-                    "",  # Will need the full text, but simplified for now
-                    issuer_config['patterns'], 
-                    selected_issuer_key
-                )
-                data.update(corrected_data)
-                
                 # Create database row
                 database_row = create_database_row(data)
                 
@@ -1007,6 +998,51 @@ if uploaded_files and os.path.exists(master_path):
                         'issuer': selected_issuer_key,
                         'data': data
                     })
+                    
+                    # Show preview for this file
+                    st.success(f"✅ {file.name} extracted successfully!")
+                    
+                    # Display preview in expander to save space
+                    with st.expander(f"Preview: {file.name} - {list(issuer_options.keys())[list(issuer_options.values()).index(selected_issuer_key)]}"):
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.write("**Core Information**")
+                            st.write(f"**Issuer:** {data.get('Issuer', 'N/A')}")
+                            st.write(f"**ISIN:** {data.get('ISIN', 'N/A')}")
+                            st.write(f"**Currency:** {data.get('CCY', 'N/A')}")
+                            st.write(f"**Notional:** {data.get('Notional Value', 'N/A')}")
+                        
+                        with col2:
+                            st.write("**Key Dates**")
+                            st.write(f"**Issue Date:** {data.get('Issue Date', 'N/A')}")
+                            st.write(f"**Strike Date:** {data.get('Strike Date', 'N/A')}")
+                            st.write(f"**Maturity:** {data.get('Maturity Date', 'N/A')}")
+                        
+                        with col3:
+                            st.write("**Risk Parameters**")
+                            st.write(f"**Knock-In:** {data.get('Knock-In%', 'N/A')}")
+                            st.write(f"**Coupon Rate:** {data.get('Coupon Rate - Annual', 'N/A')}")
+                            st.write(f"**Underlyings:** {len(data.get('underlying_assets', []))}")
+                        
+                        # Show database row preview
+                        if database_row:
+                            preview_dict = {}
+                            for i, value in enumerate(database_row):
+                                col_name = extractor.column_mapping.get(i, f"Column_{i}")
+                                if col_name and value:
+                                    preview_dict[col_name] = value
+                            
+                            if preview_dict:
+                                st.write("**Database Row Preview:**")
+                                preview_df = pd.DataFrame([preview_dict])
+                                st.dataframe(preview_df, use_container_width=True)
+                        
+                        # Show underlying assets if found
+                        if data.get('underlying_assets'):
+                            st.write("**Underlying Assets:**")
+                            df_underlying = pd.DataFrame(data['underlying_assets'])
+                            st.dataframe(df_underlying, use_container_width=True)
                 else:
                     failed_extractions.append({
                         'filename': file.name,
@@ -1026,6 +1062,9 @@ if uploaded_files and os.path.exists(master_path):
         progress_bar.progress(1.0)
         status_text.text("Processing complete!")
         
+        # Final Summary Section
+        st.subheader("📊 Processing Results Summary")
+        
         # Results summary
         col1, col2 = st.columns(2)
         
@@ -1041,6 +1080,58 @@ if uploaded_files and os.path.exists(master_path):
                 st.error(f"❌ Failed to process: {len(failed_extractions)} files")
                 for item in failed_extractions:
                     st.write(f"• {item['filename']}: {item['error']}")
+        
+        # Detailed Results for All Files
+        if successful_extractions:
+            st.subheader("📋 Complete Extraction Details")
+            
+            for item in successful_extractions:
+                issuer_name = list(issuer_options.keys())[list(issuer_options.values()).index(item['issuer'])]
+                data = item['data']
+                
+                with st.expander(f"📄 {item['filename']} - {issuer_name} Details", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.write("**Core Information**")
+                        st.write(f"**Issuer:** {data.get('Issuer', 'N/A')}")
+                        st.write(f"**ISIN:** {data.get('ISIN', 'N/A')}")
+                        st.write(f"**Currency:** {data.get('CCY', 'N/A')}")
+                        st.write(f"**Notional:** {data.get('Notional Value', 'N/A')}")
+                    
+                    with col2:
+                        st.write("**Key Dates**")
+                        st.write(f"**Issue Date:** {data.get('Issue Date', 'N/A')}")
+                        st.write(f"**Strike Date:** {data.get('Strike Date', 'N/A')}")
+                        st.write(f"**Maturity:** {data.get('Maturity Date', 'N/A')}")
+                    
+                    with col3:
+                        st.write("**Risk Parameters**")
+                        st.write(f"**Knock-In:** {data.get('Knock-In%', 'N/A')}")
+                        st.write(f"**Coupon Rate:** {data.get('Coupon Rate - Annual', 'N/A')}")
+                        st.write(f"**Underlyings:** {len(data.get('underlying_assets', []))}")
+                    
+                    # Show underlying assets if found
+                    if data.get('underlying_assets'):
+                        st.write("**Underlying Assets:**")
+                        df_underlying = pd.DataFrame(data['underlying_assets'])
+                        st.dataframe(df_underlying, use_container_width=True)
+            
+            # Show consolidated database preview
+            st.subheader("🗃️ Database Rows Added")
+            consolidated_preview = []
+            for item in successful_extractions:
+                database_row = create_database_row(item['data'])
+                preview_dict = {'File': item['filename']}
+                for i, value in enumerate(database_row):
+                    col_name = extractor.column_mapping.get(i, f"Column_{i}")
+                    if col_name and value:
+                        preview_dict[col_name] = value
+                consolidated_preview.append(preview_dict)
+            
+            if consolidated_preview:
+                consolidated_df = pd.DataFrame(consolidated_preview)
+                st.dataframe(consolidated_df, use_container_width=True)
         
         # Download updated master file
         if successful_extractions:
