@@ -748,59 +748,114 @@ def create_database_row(data):
     """Create database row with proper formatting matching the CSV sample exactly"""
     import re
     
-    # Create a row with 44 columns to match your format exactly
-    row = [''] * 44
+    # Create a row with 63 columns to match the full format
+    row = [''] * 63
     
     # Handle different issuer-specific product naming
     issuer_type = data.get('Detected_Issuer_Type', '')
     
     if issuer_type == 'citigroup':
-        investment_name = 'CG ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'CG Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'CG {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'CG Product'
         product_name = 'Australian Diversified: COL/MQG/RIO'  # Match your sample
         investment_thematic = 'Australian Diversified'
-        product_type = 'ACE 90%'
+        # Determine if this is PCN or ACE based on coupon structure
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
         
     elif issuer_type == 'macquarie':
-        investment_name = 'MBL ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'MBL Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'MBL {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'MBL Product'
         product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 95%'
+        # MBL products are typically ACE (Autocallable) unless they have barrier coupons
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 95%'  # No coupon = Autocallable
         min_tenor = 2
         
     elif issuer_type == 'ubs':
-        investment_name = 'UBS ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'UBS Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'UBS {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'UBS Product'
         product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 90%'
+        # UBS typically offers ACE products unless barrier-dependent coupons
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
         
     elif issuer_type == 'bnp_paribas':
-        investment_name = 'BNP ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'BNP Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'BNP {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'BNP Product'
         product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 90%'
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
         
     elif issuer_type == 'barclays':
-        investment_name = 'BARC ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'BARC Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'BARC {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'BARC Product'
         product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 90%'
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
         
     elif issuer_type == 'natixis':
-        investment_name = 'NX ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'NX Product'
+        maturity_date = data.get('Maturity Date', '')
+        if maturity_date:
+            investment_name = f'NX {maturity_date.replace("/", "-")}'
+        else:
+            investment_name = 'NX Product'
         product_name = 'European Banks'
         investment_thematic = 'EU Banks'
-        product_type = 'ACE 90%'
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
         
     else:
         investment_name = data.get('Source_File', '').replace('.pdf', '')
         product_name = 'Unknown Product'
         investment_thematic = 'Structured Product'
-        product_type = 'ACE 90%'
+        coupon_rate = data.get('Coupon Rate - Annual', '')
+        if coupon_rate and isinstance(coupon_rate, (int, float)) and coupon_rate > 0:
+            product_type = 'PCN'  # Has coupon = Phoenix Coupon Note
+        else:
+            product_type = 'ACE 90%'  # No coupon = Autocallable
         min_tenor = 2
 
     # Get coupon rate and format properly
@@ -825,8 +880,14 @@ def create_database_row(data):
     row[5] = coupon_qtr_pct  # Coupon - QTR as percentage string
     row[6] = coupon_annual_decimal  # Coupon Rate - Annual as decimal for Excel formatting
     row[7] = 'Active'
-    row[8] = data.get('Knock-In%', 0.6)  # 60% as decimal (0.6)
-    row[9] = data.get('Knock-Out%', 0.9)  # 90% as decimal (0.9)
+    
+    # Apply Knock-In% (coupon barrier) ONLY for PCN products
+    if product_type == 'PCN':
+        row[8] = data.get('Knock-In%', 0.6)  # 60% coupon barrier for PCN
+    else:
+        row[8] = ''  # No coupon barrier for ACE products
+        
+    row[9] = data.get('Knock-Out%', 0.9)  # 90% autocall level for all products
     row[10] = 1.0  # Issue Price% - always 100% (1.0 as decimal)
     row[11] = min_tenor  # Minimum Tenor (Q)
     row[12] = 12  # Maximum Tenor (Q)
@@ -866,11 +927,17 @@ def create_database_row(data):
         row[25] = formatted_amount  # Total Units
         row[26] = formatted_amount  # Notional Value
         row[27] = formatted_amount if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
+    else:
+        # Default values if no notional found
+        row[24] = "$100.00"  # Investment $
+        row[25] = "$100.00"  # Total Units
+        row[26] = "$100.00"  # Notional Value
+        row[27] = "$100.00" if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
     
     row[28] = data.get('Maturity Date', '')
     row[29] = ''  # Revenue (calculated later)
     row[30] = 0.023  # UF% as decimal (2.30%)
-    # row[31] is empty
+    row[31] = ''  # Empty column
     
     # Underlying prices (32-43) - extract numeric values for Excel currency formatting
     for i in range(4):
@@ -894,6 +961,19 @@ def create_database_row(data):
                 price_matches = re.findall(r'[\d.]+', knock_out_price)
                 if price_matches:
                     row[42 + i] = float(price_matches[0])
+    
+    # Market close prices (47-50) - empty for now
+    for i in range(4):
+        row[47 + i] = ''
+    
+    row[51] = ''  # Empty column
+    
+    # Maturity date duplicate (52)
+    row[52] = data.get('Maturity Date', '')
+    
+    # Valuation dates (53-62) - empty for now
+    for i in range(10):
+        row[53 + i] = ''
     
     return row
 
@@ -937,7 +1017,12 @@ def append_to_fixed_income_master(new_row_data, master_file_path):
             " Underlying 4 - Issue Price ", "", " Underlying 1 - Knock In Price ", 
             " Underlying 2 - Knock In Price ", " Underlying 3 - Knock In Price ", 
             " Underlying 4 - Knock In Price ", "", " Underlying 1 - Knock Out ", 
-            " Underlying 2 - Knock Out ", " Underlying 3 - Knock Out ", " Underlying 4 - Knock Out "
+            " Underlying 2 - Knock Out ", " Underlying 3 - Knock Out ", " Underlying 4 - Knock Out ", "",
+            "Underlying 1 - Market Close", "Underlying 2 - Market Close", "Underlying 3 - Market Close", 
+            "Underlying 4 - Market Close", "", "Maturity Date:", "Valuation Date 1", "Valuation Date 2", 
+            "Valuation Date 3", "Valuation Date 4", "Valuation Date 5", "Valuation Date 6", 
+            "Valuation Date 7", "Valuation Date 8", "Valuation Date 9", "Valuation Date 10", 
+            "Valuation Date 11", "Valuation Date 12"
         ]
         
         # Add headers if this is a new file
