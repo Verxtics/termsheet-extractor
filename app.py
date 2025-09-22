@@ -486,56 +486,86 @@ class FixedIncomeTermsheetExtractor:
     def extract_notional_amount(self, text, issuer_type):
         """Extract notional amount with issuer-specific handling"""
         
+        def safe_int_conversion(value_str):
+            """Safely convert string to int with error handling"""
+            try:
+                if value_str and value_str.strip():
+                    return int(value_str.replace(',', ''))
+                return None
+            except (ValueError, AttributeError):
+                return None
+        
         if issuer_type == 'citigroup':
             # Look for "Issue Size" pattern
             issue_size_match = re.search(r'Issue Size.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if issue_size_match:
-                return int(issue_size_match.group(1).replace(',', ''))
+                result = safe_int_conversion(issue_size_match.group(1))
+                if result:
+                    return result
             
             # Look for "Denomination" pattern  
             denomination_match = re.search(r'Denomination.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if denomination_match:
-                return int(denomination_match.group(1).replace(',', ''))
+                result = safe_int_conversion(denomination_match.group(1))
+                if result:
+                    return result
                 
         elif issuer_type == 'macquarie':
             # Look for "Aggregate Nominal Amount"
             aggregate_match = re.search(r'Aggregate Nominal Amount.*?AUD\s*([\d,]+(?:\.\d{2})?)', text, re.IGNORECASE)
             if aggregate_match:
-                return int(float(aggregate_match.group(1).replace(',', '')))
+                try:
+                    value_str = aggregate_match.group(1).replace(',', '')
+                    if value_str:
+                        return int(float(value_str))
+                except (ValueError, AttributeError):
+                    pass
                 
         elif issuer_type == 'ubs':
             # Look for "Issue proceeds" or similar
             proceeds_match = re.search(r'(?:Issue proceeds|Issue Amount).*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if proceeds_match:
-                return int(proceeds_match.group(1).replace(',', ''))
+                result = safe_int_conversion(proceeds_match.group(1))
+                if result:
+                    return result
                 
         elif issuer_type == 'bnp_paribas':
             # Look for "Issue Amount"
             issue_amount_match = re.search(r'Issue Amount.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if issue_amount_match:
-                return int(issue_amount_match.group(1).replace(',', ''))
+                result = safe_int_conversion(issue_amount_match.group(1))
+                if result:
+                    return result
                 
         elif issuer_type == 'barclays':
             # Look for "Aggregate Nominal Amount"
             aggregate_match = re.search(r'Aggregate Nominal Amount.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if aggregate_match:
-                return int(aggregate_match.group(1).replace(',', ''))
+                result = safe_int_conversion(aggregate_match.group(1))
+                if result:
+                    return result
             
             # Look for "Specified Denomination"
             denomination_match = re.search(r'Specified Denomination.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if denomination_match:
-                return int(denomination_match.group(1).replace(',', ''))
+                result = safe_int_conversion(denomination_match.group(1))
+                if result:
+                    return result
                 
         elif issuer_type == 'natixis':
             # Look for "Aggregate nominal amount" (lowercase)
             aggregate_match = re.search(r'Aggregate nominal amount.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if aggregate_match:
-                return int(aggregate_match.group(1).replace(',', ''))
+                result = safe_int_conversion(aggregate_match.group(1))
+                if result:
+                    return result
             
             # Look for "Denomination"
             denomination_match = re.search(r'Denomination.*?AUD\s*([\d,]+)', text, re.IGNORECASE)
             if denomination_match:
-                return int(denomination_match.group(1).replace(',', ''))
+                result = safe_int_conversion(denomination_match.group(1))
+                if result:
+                    return result
         
         # Standard notional patterns for other issuers
         notional_patterns = [
@@ -548,7 +578,9 @@ class FixedIncomeTermsheetExtractor:
         for pattern in notional_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                return int(match.group(1).replace(',', ''))
+                result = safe_int_conversion(match.group(1))
+                if result:
+                    return result
         
         return ''
 
@@ -851,7 +883,10 @@ def create_database_row(data):
             elif extracted_knockout >= 0.85:
                 product_type = 'ACE 85%'
             else:
-                product_type = f'ACE {int(extracted_knockout * 100)}%'
+                try:
+                    product_type = f'ACE {int(extracted_knockout * 100)}%'
+                except (ValueError, TypeError):
+                    product_type = 'ACE 90%'  # Fallback
         else:
             # Extract from product name patterns in termsheet
             extracted_product_type = data.get('Product_Type', '') or data.get('TYPE', '')
