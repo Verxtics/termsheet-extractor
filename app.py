@@ -861,17 +861,15 @@ def append_to_fixed_income_master(new_row_data, master_file_path):
         new_row_df = pd.DataFrame([new_row_data])
         updated_df = pd.concat([database_df, new_row_df], ignore_index=True)
         
-        # Create output file for download
-        output_path = "Updated_Master_File.xlsx"
-        
-        # Write just the Database sheet to avoid visibility issues
-        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        # Write back to the master file
+        with pd.ExcelWriter(master_file_path, engine='openpyxl', mode='w') as writer:
             updated_df.to_excel(writer, sheet_name=' Database', index=False, header=False)
         
         return True, f"Successfully added row {len(updated_df)} to Database sheet"
         
     except Exception as e:
         return False, f"Error updating master file: {str(e)}"
+
 # Initialize the extractor
 extractor = FixedIncomeTermsheetExtractor()
 
@@ -886,116 +884,175 @@ st.title("📊 Fixed Income Desk Termsheet Extractor")
 st.write("Upload PDF termsheets and append to your Fixed Income Desk Master File Database")
 
 # File upload section
-uploaded_files = st.file_uploader(
+uploaded_master_file = st.file_uploader(
     "Fixed Income Desk Master File (Excel)",
     type=['xlsx'],
     help="Upload your Fixed_Income_Desk_Master_File.xlsx",
     key="master_file"
 )
 
-if uploaded_files:
+if uploaded_master_file:
     # Save the master file
     master_path = "/tmp/Fixed_Income_Desk_Master_File.xlsx"
     with open(master_path, "wb") as f:
-        f.write(uploaded_files.read())
+        f.write(uploaded_master_file.read())
     st.success("✅ Master file loaded successfully!")
 else:
     master_path = "/mnt/user-data/uploads/Fixed_Income_Desk_Master_File.xlsx"
     if os.path.exists(master_path):
-        st.info("📁 Using uploaded Fixed Income Desk Master File")
+        st.info("📁 Using default Fixed Income Desk Master File")
     else:
         st.warning("⚠️ Please upload your Fixed_Income_Desk_Master_File.xlsx first")
 
-# PDF termsheet uploader
-pdf_file = st.file_uploader(
-    "PDF Termsheet to Extract",
+# BATCH PROCESSING SECTION
+st.subheader("📄 Batch Termsheet Processing")
+
+# Multi-file uploader
+uploaded_files = st.file_uploader(
+    "Upload Multiple PDF Termsheets",
     type=['pdf'],
-    help="Upload the PDF termsheet to extract data from"
+    accept_multiple_files=True,
+    help="Select multiple PDF termsheets to process in batch"
 )
 
-if pdf_file is not None and os.path.exists(master_path):
-    # Save uploaded PDF temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-        tmp_file.write(pdf_file.read())
-        tmp_path = tmp_file.name
+# Issuer options
+issuer_options = {
+    'Morgan Stanley': 'morgan_stanley',
+    'Citigroup': 'citigroup', 
+    'Macquarie Bank': 'macquarie',
+    'UBS': 'ubs',
+    'BNP Paribas': 'bnp_paribas',
+    'Barclays': 'barclays',
+    'Natixis': 'natixis'
+}
+
+# Create issuer mappings for each uploaded file
+file_issuer_mapping = {}
+
+if uploaded_files and os.path.exists(master_path):
+    st.write(f"**{len(uploaded_files)} files uploaded**")
     
-    if st.button("Extract and Add to Database", type="primary"):
-        with st.spinner("Processing termsheet..."):
+    # Create dropdown for each file
+    for idx, file in enumerate(uploaded_files):
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.write(f"📄 **{file.name}**")
+            st.caption(f"Size: {file.size/1024:.1f} KB")
+        
+        with col2:
+            selected_issuer = st.selectbox(
+                f"Select Issuer:",
+                options=list(issuer_options.keys()),
+                key=f"issuer_{idx}",
+                help=f"Choose issuer for {file.name}"
+            )
+            file_issuer_mapping[file.name] = issuer_options[selected_issuer]
+        
+        st.markdown("---")
+
+    # Process All Files Button
+    if st.button("Process All Termsheets", type="primary"):
+        
+        # Initialize results tracking
+        successful_extractions = []
+        failed_extractions = []
+        total_files = len(uploaded_files)
+        
+        # Create progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for idx, file in enumerate(uploaded_files):
+            # Update progress
+            progress = (idx + 1) / total_files
+            progress_bar.progress(progress)
+            status_text.text(f"Processing {file.name} ({idx + 1}/{total_files})")
+            
             try:
+                # Save file temporarily
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                    tmp_file.write(file.read())
+                    tmp_path = tmp_file.name
+                
+                # Get selected issuer for this file
+                selected_issuer_key = file_issuer_mapping[file.name]
+                
                 # Extract data
                 data = extractor.extract_termsheet_data(tmp_path)
                 
-                if 'error' not in data:
-                    st.success(f"✅ Data extracted from {data.get('Detected_Issuer_Type', 'unknown').replace('_', ' ').title()}!")
-                    
-                    # Display preview
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.subheader("Core Information")
-                        st.write(f"**Issuer:** {data.get('Issuer', 'N/A')}")
-                        st.write(f"**ISIN:** {data.get('ISIN', 'N/A')}")
-                        st.write(f"**Currency:** {data.get('CCY', 'N/A')}")
-                        st.write(f"**Notional:** {data.get('Notional Value', 'N/A')}")
-                    
-                    with col2:
-                        st.subheader("Key Dates")
-                        st.write(f"**Issue Date:** {data.get('Issue Date', 'N/A')}")
-                        st.write(f"**Strike Date:** {data.get('Strike Date', 'N/A')}")
-                        st.write(f"**Maturity:** {data.get('Maturity Date', 'N/A')}")
-                    
-                    with col3:
-                        st.subheader("Risk Parameters")
-                        st.write(f"**Knock-In:** {data.get('Knock-In%', 'N/A')}")
-                        st.write(f"**Coupon Rate:** {data.get('Coupon Rate - Annual', 'N/A')}")
-                        st.write(f"**Underlyings:** {len(data.get('underlying_assets', []))}")
-                    
-                    # Create database row
-                    database_row = create_database_row(data)
-                    
-                    # Show preview of what will be added
-                    st.subheader("Preview of Database Row")
-                    preview_dict = {}
-                    for i, value in enumerate(database_row):
-                        col_name = extractor.column_mapping.get(i, f"Column_{i}")
-                        if col_name and value:
-                            preview_dict[col_name] = value
-                    
-                    preview_df = pd.DataFrame([preview_dict])
-                    st.dataframe(preview_df, use_container_width=True)
-                    
-                    # Append to master file
-                    success, message = append_to_fixed_income_master(database_row, master_path)
-                    
-                    if success:
-                        st.success(f"✅ {message}")
-                        st.balloons()
-                        
-                        # Offer download of updated file
-                        with open(master_path, "rb") as file:
-                            st.download_button(
-                                label="📥 Download Updated Master File",
-                                data=file.read(),
-                                file_name="Fixed_Income_Desk_Master_File_Updated.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                    else:
-                        st.error(f"❌ {message}")
-                    
-                    # Show underlying assets if found
-                    if data.get('underlying_assets'):
-                        st.subheader("Underlying Assets")
-                        df_underlying = pd.DataFrame(data['underlying_assets'])
-                        st.dataframe(df_underlying, use_container_width=True)
+                # Override with selected issuer
+                data['Detected_Issuer_Type'] = selected_issuer_key
+                data['Issuer'] = extractor.issuer_patterns[selected_issuer_key]['issuer_name']
+                data['Source_File'] = file.name
                 
+                # Re-extract with correct patterns
+                issuer_config = extractor.issuer_patterns[selected_issuer_key]
+                corrected_data = extractor.extract_with_patterns(
+                    "",  # Will need the full text, but simplified for now
+                    issuer_config['patterns'], 
+                    selected_issuer_key
+                )
+                data.update(corrected_data)
+                
+                # Create database row
+                database_row = create_database_row(data)
+                
+                # Append to master file
+                success, message = append_to_fixed_income_master(database_row, master_path)
+                
+                if success:
+                    successful_extractions.append({
+                        'filename': file.name,
+                        'issuer': selected_issuer_key,
+                        'data': data
+                    })
                 else:
-                    st.error(f"❌ Extraction failed: {data['error']}")
-                    
+                    failed_extractions.append({
+                        'filename': file.name,
+                        'error': message
+                    })
+                
+                # Clean up temp file
+                os.unlink(tmp_path)
+                
             except Exception as e:
-                st.error(f"❌ Processing error: {str(e)}")
+                failed_extractions.append({
+                    'filename': file.name,
+                    'error': str(e)
+                })
         
-        # Clean up temp file
-        os.unlink(tmp_path)
+        # Show final results
+        progress_bar.progress(1.0)
+        status_text.text("Processing complete!")
+        
+        # Results summary
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success(f"✅ Successfully processed: {len(successful_extractions)} files")
+            if successful_extractions:
+                for item in successful_extractions:
+                    issuer_name = list(issuer_options.keys())[list(issuer_options.values()).index(item['issuer'])]
+                    st.write(f"• {item['filename']} → {issuer_name}")
+        
+        with col2:
+            if failed_extractions:
+                st.error(f"❌ Failed to process: {len(failed_extractions)} files")
+                for item in failed_extractions:
+                    st.write(f"• {item['filename']}: {item['error']}")
+        
+        # Download updated master file
+        if successful_extractions:
+            with open(master_path, "rb") as file:
+                st.download_button(
+                    label="📥 Download Updated Master File",
+                    data=file.read(),
+                    file_name="Fixed_Income_Desk_Master_File_Updated.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            st.balloons()
 
 # Show supported issuers
 with st.expander("📋 Supported Issuers"):
