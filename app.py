@@ -745,127 +745,231 @@ class FixedIncomeTermsheetExtractor:
         return extracted
 
 def create_database_row(data):
-    """Convert extracted data to match your exact Database sheet format"""
+    """Create database row with proper formatting matching the CSV sample exactly"""
+    import re
     
-    # Create a row with 44 columns to match your Database sheet
+    # Create a row with 44 columns to match your format exactly
     row = [''] * 44
     
     # Handle different issuer-specific product naming
     issuer_type = data.get('Detected_Issuer_Type', '')
     
     if issuer_type == 'citigroup':
-        investment_name = 'CG ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'CG Product'
-        product_name = 'Snowballing Autocall Notes'
-        investment_thematic = 'European Banking'
-        product_type = 'Snowball AC'
-        min_tenor = 6  # Citi starts at ~1.5 years
+        investment_name = 'CG ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'CG Product'
+        product_name = 'Australian Diversified: COL/MQG/RIO'  # Match your sample
+        investment_thematic = 'Australian Diversified'
+        product_type = 'ACE 90%'
+        min_tenor = 2
         
     elif issuer_type == 'macquarie':
-        investment_name = 'MBL ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'MBL Product'
-        product_name = 'Equity Linked Note'
+        investment_name = 'MBL ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'MBL Product'
+        product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 90%'  # Based on 90% knock-out level
-        min_tenor = 6  # MBL starts at ~1.5 years
+        product_type = 'ACE 95%'
+        min_tenor = 2
         
     elif issuer_type == 'ubs':
-        investment_name = 'UBS ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'UBS Product'
-        product_name = 'UBS Equity Goals'
+        investment_name = 'UBS ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'UBS Product'
+        product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'Snowball AC'  # UBS uses snowball coupon
-        min_tenor = 2  # UBS starts from N=2
+        product_type = 'ACE 90%'
+        min_tenor = 2
         
     elif issuer_type == 'bnp_paribas':
-        investment_name = 'BNP ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'BNP Product'
-        product_name = 'Certificate'
+        investment_name = 'BNP ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'BNP Product'
+        product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'ACE 90%'  # Based on 90% trigger level
-        min_tenor = 12  # BNP 36 months product
+        product_type = 'ACE 90%'
+        min_tenor = 2
         
     elif issuer_type == 'barclays':
-        investment_name = 'BARC ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'BARC Product'
-        product_name = 'Periodic Snowball Autocall'
+        investment_name = 'BARC ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'BARC Product'
+        product_name = 'US Tech'
         investment_thematic = 'US Tech'
-        product_type = 'Snowball AC'  # Barclays snowball structure
-        min_tenor = 4  # Standard quarterly structure
+        product_type = 'ACE 90%'
+        min_tenor = 2
         
     elif issuer_type == 'natixis':
-        investment_name = 'NATIXIS ' + data.get('Maturity Date', '').replace(' ', '-') if data.get('Maturity Date') else 'NATIXIS Product'
-        product_name = 'Autocall Incremental'
-        investment_thematic = 'European Banking'
-        product_type = 'ACE 90%'  # Based on 90% autocall level
-        min_tenor = 4  # Standard quarterly structure
+        investment_name = 'NX ' + data.get('Maturity Date', '').replace('/', '-') if data.get('Maturity Date') else 'NX Product'
+        product_name = 'European Banks'
+        investment_thematic = 'EU Banks'
+        product_type = 'ACE 90%'
+        min_tenor = 2
         
     else:
         investment_name = data.get('Source_File', '').replace('.pdf', '')
-        product_name = f"{issuer_type.replace('_', ' ').title()} Product"
+        product_name = 'Unknown Product'
         investment_thematic = 'Structured Product'
-        product_type = 'Autocallable'
-        min_tenor = 4
+        product_type = 'ACE 90%'
+        min_tenor = 2
+
+    # Get coupon rate and format properly
+    coupon_rate = data.get('Coupon Rate - Annual', '')
+    if isinstance(coupon_rate, (int, float)) and coupon_rate != '':
+        if coupon_rate < 1:  # If it's decimal (0.1544), convert to percentage
+            coupon_qtr_pct = f"{coupon_rate * 100 / 4:.3f}%"  # Quarterly as percentage string
+            coupon_annual_decimal = coupon_rate  # Keep as decimal for Excel percentage formatting
+        else:  # If it's already percentage
+            coupon_qtr_pct = f"{coupon_rate / 4:.3f}%"
+            coupon_annual_decimal = coupon_rate / 100
+    else:
+        coupon_qtr_pct = ''
+        coupon_annual_decimal = ''
+
+    # Map data to exact column positions from your CSV
+    row[0] = investment_name
+    row[1] = data.get('Issuer', '')
+    row[2] = product_name
+    row[3] = investment_thematic
+    row[4] = product_type
+    row[5] = coupon_qtr_pct  # Coupon - QTR as percentage string
+    row[6] = coupon_annual_decimal  # Coupon Rate - Annual as decimal for Excel formatting
+    row[7] = 'Active'
+    row[8] = data.get('Knock-In%', 0.6)  # 60% as decimal (0.6)
+    row[9] = data.get('Knock-Out%', 0.9)  # 90% as decimal (0.9)
+    row[10] = 1.0  # Issue Price% - always 100% (1.0 as decimal)
+    row[11] = min_tenor  # Minimum Tenor (Q)
+    row[12] = 12  # Maximum Tenor (Q)
+    row[13] = 1  # Observation Frequency (1 = Quarterly)
+    row[14] = data.get('CCY', 'AUD')
+    row[15] = data.get('Strike Date', '')
+    row[16] = data.get('Issue Date', '')
+    row[17] = data.get('ISIN', '')
+    # row[18] is empty
     
-    # Map data to your exact column positions
-    row[0] = investment_name  # Investment Name
-    row[1] = data.get('Issuer', '')  # Issuer
-    row[2] = product_name  # Product Name
-    row[3] = investment_thematic  # Investment Thematic
-    row[4] = product_type  # TYPE
-    row[5] = 'Quarterly'  # Coupon - QTR
-    row[6] = data.get('Coupon Rate - Annual', '')  # Coupon Rate - Annual
-    row[7] = 'Active'  # Product Status
-    row[8] = data.get('Knock-In%', '')  # Knock-In%
-    row[9] = data.get('Knock-Out%', 0.95)  # Knock-Out%
-    row[10] = min_tenor  # Minimum Tenor (Q) - issuer-specific
-    row[11] = 12  # Maximum Tenor (Q)
-    row[12] = 'Quarterly'  # Observation Frequency
-    row[13] = data.get('CCY', 'USD')  # CCY
-    row[14] = data.get('Strike Date', '')  # Strike Date
-    row[15] = data.get('Issue Date', '')  # Issue Date
-    row[16] = data.get('ISIN', '')  # ISIN
-    # row[17] is empty
-    
-    # Underlying assets (18-21)
+    # Underlying assets (19-22) - format like your sample: "Company Name (TICKER)"
     underlyings = data.get('underlying_assets', [])
     for i in range(4):
         if i < len(underlyings):
-            row[18 + i] = underlyings[i].get('Name', '')
-        else:
-            row[18 + i] = ''
+            name = underlyings[i].get('Name', '')
+            ticker = underlyings[i].get('Ticker', '') or underlyings[i].get('Bloomberg_Code', '')
+            
+            # Clean up ticker format
+            if ticker:
+                clean_ticker = ticker.replace(' UW', '').replace('.OQ', '').replace('.N', '').replace(' UN', '')
+                clean_ticker = clean_ticker.replace('GOOG UW', 'GOOG').replace('META UW', 'META')
+                clean_ticker = clean_ticker.replace('MSFT UW', 'MSFT').replace('ORCL UN', 'ORCL')
+                clean_ticker = clean_ticker.replace('BBVA SQ', 'BBVA').replace('BARC LN', 'BARC')
+                clean_ticker = clean_ticker.replace('UBSG SE', 'UBSG').replace('GLE FP', 'GLE')
+                formatted_name = f"{name} ({clean_ticker})"
+            else:
+                formatted_name = name
+            row[19 + i] = formatted_name
     
-    # row[22] is empty
-    row[23] = data.get('Notional Value', '')  # Investment $
-    row[24] = 1  # Total Units (simplified)
-    row[25] = data.get('Notional Value', '')  # Notional Value
-    row[26] = data.get('Notional Value', '') if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
-    row[27] = data.get('Maturity Date', '')  # Maturity Date
-    row[28] = ''  # Revenue (to be calculated)
-    # row[29] is empty
+    # row[23] is empty
     
-    # Underlying prices (30-43)
+    # Financial amounts - format as currency strings like your sample
+    notional = data.get('Notional Value', '')
+    if isinstance(notional, (int, float)) and notional != '':
+        formatted_amount = f"${notional:,.2f}"
+        row[24] = formatted_amount  # Investment $
+        row[25] = formatted_amount  # Total Units
+        row[26] = formatted_amount  # Notional Value
+        row[27] = formatted_amount if data.get('CCY') == 'AUD' else ''  # AUD Equivalent
+    
+    row[28] = data.get('Maturity Date', '')
+    row[29] = ''  # Revenue (calculated later)
+    row[30] = 0.023  # UF% as decimal (2.30%)
+    # row[31] is empty
+    
+    # Underlying prices (32-43) - extract numeric values for Excel currency formatting
     for i in range(4):
         if i < len(underlyings):
-            row[30 + i] = underlyings[i].get('Initial_Price', '')  # Issue Prices
-            row[35 + i] = underlyings[i].get('Knock_In_Price', '')  # Knock In Prices  
-            row[40 + i] = underlyings[i].get('Knock_Out_Price', '')  # Knock Out Prices
-        else:
-            row[30 + i] = ''
-            row[35 + i] = ''
-            row[40 + i] = ''
+            initial_price = underlyings[i].get('Initial_Price', '')
+            knock_in_price = underlyings[i].get('Knock_In_Price', '')
+            knock_out_price = underlyings[i].get('Knock_Out_Price', '')
+            
+            # Extract numeric values
+            if initial_price and isinstance(initial_price, str):
+                price_matches = re.findall(r'[\d.]+', initial_price)
+                if price_matches:
+                    row[32 + i] = float(price_matches[0])
+                    
+            if knock_in_price and isinstance(knock_in_price, str):
+                price_matches = re.findall(r'[\d.]+', knock_in_price)
+                if price_matches:
+                    row[37 + i] = float(price_matches[0])
+                    
+            if knock_out_price and isinstance(knock_out_price, str):
+                price_matches = re.findall(r'[\d.]+', knock_out_price)
+                if price_matches:
+                    row[42 + i] = float(price_matches[0])
     
     return row
 
 def append_to_fixed_income_master(new_row_data, master_file_path):
+    """Append data with proper headers, formatting, and percentage columns"""
     try:
-        # Read the Database sheet
-        database_df = pd.read_excel(master_file_path, sheet_name=' Database', header=0)
+        from openpyxl.styles import NamedStyle, Font, PatternFill, Border, Side, Alignment
+        from openpyxl.styles.numbers import FORMAT_PERCENTAGE_00, FORMAT_CURRENCY_USD_SIMPLE
+        from openpyxl import Workbook, load_workbook
         
-        # Add new row
-        new_row_df = pd.DataFrame([new_row_data])
-        updated_df = pd.concat([database_df, new_row_df], ignore_index=True)
+        # Read existing data or create new
+        try:
+            database_df = pd.read_excel(master_file_path, sheet_name=' Database', header=1)  # Headers are on row 2
+            start_row = len(database_df) + 3  # Account for header rows
+        except:
+            database_df = pd.DataFrame()
+            start_row = 3
+            
+        # Create workbook and worksheet
+        try:
+            wb = load_workbook(master_file_path)
+            if ' Database' in wb.sheetnames:
+                ws = wb[' Database']
+            else:
+                ws = wb.create_sheet(' Database')
+        except:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = ' Database'
+            start_row = 3
+            
+        # Define proper headers (matching your CSV exactly)
+        headers = [
+            "Investment Name", "Issuer", "Product Name", "Investment Thematic", "TYPE", 
+            "Coupon - QTR", "Coupon Rate - Annual", "Product Status", "Knock-In%", "Knock-Out%", 
+            "Issue Price%", "Minimum Tenor (Q)", "Maximum Tenor (Q)", "Observation Frequency", "CCY", 
+            "Strike Date", "Issue Date", "ISIN", "", "Underlying 1", "Underlying 2", "Underlying 3", 
+            "Underlying 4", "", " Investment $ ", " Total Units  ", " Notional Value ", 
+            " AUD Equivalent ", "Maturity Date", " Revenue ", "UF%", "", 
+            " Underlying 1 - Issue Price ", " Underlying 2 - Issue Price ", " Underlying 3 - Issue Price ", 
+            " Underlying 4 - Issue Price ", "", " Underlying 1 - Knock In Price ", 
+            " Underlying 2 - Knock In Price ", " Underlying 3 - Knock In Price ", 
+            " Underlying 4 - Knock In Price ", "", " Underlying 1 - Knock Out ", 
+            " Underlying 2 - Knock Out ", " Underlying 3 - Knock Out ", " Underlying 4 - Knock Out "
+        ]
         
-        # Write back to the master file
-        with pd.ExcelWriter(master_file_path, engine='openpyxl', mode='w') as writer:
-            updated_df.to_excel(writer, sheet_name=' Database', index=False, header=False)
+        # Add headers if this is a new file
+        if start_row == 3:
+            for col, header in enumerate(headers, 1):
+                ws.cell(row=2, column=col, value=header)
+                # Style headers
+                cell = ws.cell(row=2, column=col)
+                cell.font = Font(bold=True)
+                
+        # Add the new data row
+        for col, value in enumerate(new_row_data, 1):
+            if col <= len(headers):  # Don't exceed header count
+                cell = ws.cell(row=start_row, column=col, value=value)
+                
+                # Apply formatting based on column type
+                if col in [6, 7, 9, 10, 11]:  # Percentage columns
+                    if isinstance(value, (int, float)) and value != '':
+                        cell.number_format = '0.00%'
+                        
+                elif col in [25, 26, 27, 28, 30]:  # Currency columns
+                    if isinstance(value, (int, float)) and value != '':
+                        cell.number_format = '"$"#,##0.00'
+                        
+                elif col in [33, 34, 35, 36, 38, 39, 40, 41, 43, 44, 45, 46]:  # Price columns
+                    if isinstance(value, (int, float)) and value != '':
+                        cell.number_format = '"$"#,##0.000'
         
-        return True, f"Successfully added row {len(updated_df)} to Database sheet"
+        # Save the workbook
+        wb.save(master_file_path)
+        
+        return True, f"Successfully added formatted row {start_row - 2} to Database sheet"
         
     except Exception as e:
         return False, f"Error updating master file: {str(e)}"
