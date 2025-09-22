@@ -854,42 +854,197 @@ class FixedIncomeTermsheetExtractor:
         return barriers
 
     def extract_valuation_dates(self, text, tables_data, issuer_type):
-        """Extract observation/valuation dates from termsheet"""
+        """Extract ALL observation/valuation dates from termsheet with issuer-specific terminology"""
         valuation_dates = []
         
-        # Look for valuation date tables
+        # ISSUER-SPECIFIC TERMINOLOGY MAPPING
+        if issuer_type == 'morgan_stanley':
+            observation_keywords = [
+                'KNOCK-OUT DETERMINATION DAY', 'KNOCK-OUT DETERMINATION DATE',
+                'KNOCK-OUT SETTLEMENT DATE', 'DETERMINATION DAY', 'SETTLEMENT DATE',
+                'OBSERVATION', 'VALUATION', 'AUTOCALL DATE'
+            ]
+            print("Using Morgan Stanley terminology: Knock-out Determination Day/Settlement Dates")
+        elif issuer_type == 'macquarie':
+            observation_keywords = [
+                'OBSERVATION DATE', 'VALUATION DATE', 'AUTOCALL DATE',
+                'EARLY REDEMPTION DATE', 'COUPON DATE', 'PAYMENT DATE'
+            ]
+            print("Using Macquarie terminology: Observation/Valuation Dates")
+        elif issuer_type == 'ubs':
+            observation_keywords = [
+                'OBSERVATION DATE', 'VALUATION DATE', 'AUTOCALL OBSERVATION',
+                'BARRIER OBSERVATION', 'COUPON OBSERVATION'
+            ]
+            print("Using UBS terminology: Observation/Barrier Observation Dates")
+        elif issuer_type == 'bnp_paribas':
+            observation_keywords = [
+                'OBSERVATION DATE', 'VALUATION DATE', 'AUTOCALL DATE',
+                'COUPON PAYMENT DATE', 'MEMORY COUPON DATE'
+            ]
+            print("Using BNP Paribas terminology: Observation/Memory Coupon Dates")
+        elif issuer_type == 'barclays':
+            observation_keywords = [
+                'OBSERVATION DATE', 'VALUATION DATE', 'AUTOCALL DATE',
+                'BARRIER OBSERVATION', 'EARLY REDEMPTION DATE'
+            ]
+            print("Using Barclays terminology: Observation/Barrier Dates")
+        elif issuer_type == 'natixis':
+            observation_keywords = [
+                'OBSERVATION DATE', 'VALUATION DATE', 'COUPON DATE',
+                'AUTOCALL DATE', 'PAYMENT DATE'
+            ]
+            print("Using Natixis terminology: Observation/Coupon Dates")
+        else:
+            # Generic keywords
+            observation_keywords = [
+                'OBSERVATION', 'VALUATION', 'COUPON', 'PAYMENT', 'SCHEDULE', 
+                'AUTOCALL', 'EARLY REDEMPTION', 'MEMORY', 'BARRIER', 'DATE'
+            ]
+            print("Using generic terminology for observation dates")
+        
+        # STEP 1: Look for observation schedule tables with issuer-specific keywords
         for table in tables_data:
             if len(table) > 1:
                 headers = [str(cell).upper() if cell else '' for cell in table[0]]
-                # Check if this is a valuation dates table
-                if any(keyword in ' '.join(headers) for keyword in ['OBSERVATION', 'VALUATION', 'COUPON', 'DATE']):
-                    for row in table[1:]:
+                
+                # Check if this is an observation table using issuer-specific keywords
+                header_text = ' '.join(headers).upper()
+                if any(keyword in header_text for keyword in observation_keywords):
+                    print(f"Found {issuer_type} observation table with headers: {headers}")
+                    
+                    # Extract dates from all rows and columns
+                    for row_idx, row in enumerate(table[1:]):  # Skip header
                         if row:
-                            for cell in row:
+                            for col_idx in range(len(row)):
+                                cell = row[col_idx]
                                 if cell and isinstance(cell, str):
-                                    # Look for date patterns
-                                    date_match = re.search(r'(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})', str(cell))
-                                    if date_match:
-                                        date_str = f"{date_match.group(1)}/{date_match.group(2)}/{date_match.group(3)}"
-                                        if date_str not in valuation_dates:
-                                            valuation_dates.append(date_str)
+                                    cell_str = str(cell).strip()
+                                    
+                                    # Multiple date format patterns
+                                    date_patterns = [
+                                        r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',  # MM/DD/YYYY, MM-DD-YYYY, MM.DD.YYYY
+                                        r'(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})',  # DD Month YYYY
+                                        r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})',  # Month DD, YYYY
+                                        r'(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})',  # YYYY/MM/DD
+                                    ]
+                                    
+                                    for pattern in date_patterns:
+                                        matches = re.findall(pattern, cell_str, re.IGNORECASE)
+                                        for match in matches:
+                                            if len(match) == 3:
+                                                try:
+                                                    # Handle different date formats
+                                                    if match[1].isalpha():  # Month name format
+                                                        month_names = {
+                                                            'january': '1', 'february': '2', 'march': '3', 'april': '4',
+                                                            'may': '5', 'june': '6', 'july': '7', 'august': '8',
+                                                            'september': '9', 'october': '10', 'november': '11', 'december': '12'
+                                                        }
+                                                        month = month_names.get(match[1].lower(), match[1])
+                                                        if pattern.startswith(r'(\d{1,2})'):  # DD Month YYYY
+                                                            date_str = f"{month}/{match[0]}/{match[2]}"
+                                                        else:  # Month DD, YYYY
+                                                            date_str = f"{month}/{match[1]}/{match[2]}"
+                                                    elif pattern.startswith(r'(\d{4})'):  # YYYY format
+                                                        date_str = f"{match[1]}/{match[2]}/{match[0]}"
+                                                    else:  # MM/DD/YYYY format
+                                                        date_str = f"{match[0]}/{match[1]}/{match[2]}"
+                                                    
+                                                    # Validate year range (2024-2030)
+                                                    year = int(date_str.split('/')[2])
+                                                    if 2024 <= year <= 2030:
+                                                        if date_str not in valuation_dates:
+                                                            valuation_dates.append(date_str)
+                                                            print(f"Found {issuer_type} valuation date: {date_str}")
+                                                except (ValueError, IndexError):
+                                                    continue
         
-        # If no table found, extract from text patterns
-        if not valuation_dates:
-            # Look for quarterly date patterns
-            quarterly_patterns = [
-                r'(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
-            ]
+        # STEP 2: Text-based search with issuer-specific terminology
+        if len(valuation_dates) < 8:
+            print(f"Only found {len(valuation_dates)} dates in tables, searching text with {issuer_type} terminology...")
             
-            for pattern in quarterly_patterns:
-                matches = re.findall(pattern, text)
-                for match in matches:
-                    date_str = f"{match[0]}/{match[1]}/{match[2]}"
-                    # Filter out issue/maturity dates and only include future quarterly dates
-                    if len(valuation_dates) < 12 and date_str not in valuation_dates:
-                        valuation_dates.append(date_str)
+            # Look for issuer-specific observation schedule sections
+            text_sections = text.split('\n')
+            in_schedule_section = False
+            
+            for line in text_sections:
+                line_upper = line.upper()
+                
+                # Detect start of observation schedule section using issuer keywords
+                if any(keyword in line_upper for keyword in observation_keywords):
+                    in_schedule_section = True
+                    print(f"Found {issuer_type} schedule section: {line}")
+                    continue
+                
+                # Morgan Stanley specific patterns
+                if issuer_type == 'morgan_stanley':
+                    # Look for MS-specific date patterns
+                    ms_patterns = [
+                        r'Knock-out Determination Day[:\s]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',
+                        r'Determination Day[:\s]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',
+                        r'Settlement Date[:\s]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',
+                        r'Knock-out Settlement Date[:\s]*(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',
+                    ]
+                    
+                    for pattern in ms_patterns:
+                        matches = re.findall(pattern, line, re.IGNORECASE)
+                        for match in matches:
+                            try:
+                                date_str = f"{match[0]}/{match[1]}/{match[2]}"
+                                year = int(match[2])
+                                if 2024 <= year <= 2030 and date_str not in valuation_dates:
+                                    valuation_dates.append(date_str)
+                                    print(f"Found MS determination/settlement date: {date_str}")
+                            except (ValueError, IndexError):
+                                continue
+                
+                # Extract dates from schedule section or anywhere in text
+                if in_schedule_section or len(valuation_dates) < 4:
+                    date_patterns = [
+                        r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})',
+                        r'(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})',
+                        r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})',
+                    ]
+                    
+                    for pattern in date_patterns:
+                        matches = re.findall(pattern, line, re.IGNORECASE)
+                        for match in matches:
+                            try:
+                                if len(match) == 3:
+                                    # Convert to MM/DD/YYYY format
+                                    if match[1].isalpha():  # Month name
+                                        month_names = {
+                                            'january': '1', 'february': '2', 'march': '3', 'april': '4',
+                                            'may': '5', 'june': '6', 'july': '7', 'august': '8',
+                                            'september': '9', 'october': '10', 'november': '11', 'december': '12'
+                                        }
+                                        month = month_names.get(match[1].lower(), match[1])
+                                        if pattern.startswith(r'(\d{1,2})'):  # DD Month YYYY
+                                            date_str = f"{month}/{match[0]}/{match[2]}"
+                                        else:  # Month DD, YYYY
+                                            date_str = f"{month}/{match[1]}/{match[2]}"
+                                    else:  # Numeric format
+                                        date_str = f"{match[0]}/{match[1]}/{match[2]}"
+                                    
+                                    # Validate and add
+                                    year = int(date_str.split('/')[2])
+                                    if 2024 <= year <= 2030 and date_str not in valuation_dates:
+                                        valuation_dates.append(date_str)
+                                        print(f"Found {issuer_type} text date: {date_str}")
+                            except (ValueError, IndexError):
+                                continue
         
-        return valuation_dates[:12]  # Limit to 12 valuation dates
+        # STEP 3: Sort and return up to 12 dates
+        if valuation_dates:
+            # Sort dates chronologically
+            try:
+                valuation_dates.sort(key=lambda x: (int(x.split('/')[2]), int(x.split('/')[0]), int(x.split('/')[1])))
+            except:
+                pass  # Keep original order if sorting fails
+        
+        print(f"Final {issuer_type} valuation dates found: {len(valuation_dates)} - {valuation_dates[:12]}")
+        return valuation_dates[:12]  # Return maximum 12 dates
 
     def extract_product_details(self, text, issuer_type):
         """Extract detailed product information"""
