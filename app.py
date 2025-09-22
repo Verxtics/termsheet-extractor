@@ -585,162 +585,170 @@ class FixedIncomeTermsheetExtractor:
         return ''
 
     def extract_underlying_assets(self, text, tables_data, issuer_type):
-        """Extract underlying asset information with issuer-specific handling"""
+        """Extract underlying asset information with comprehensive table and text parsing"""
         underlyings = []
         
-        # Issuer-specific underlying extraction
-        if issuer_type == 'citigroup':
-            # Citigroup European banks
-            citi_banks = ['Banco Santander SA', 'BNP Paribas', 'Societe Generale', 'UBS Group AG']
-            for bank in citi_banks:
-                if bank.upper() in text.upper():
-                    underlyings.append({
-                        'Name': bank,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-                    
-        elif issuer_type == 'macquarie':
-            # Macquarie US Tech stocks with tickers
-            mbl_tech_stocks = [
-                ('Oracle Corporation', 'ORCL.N'),
-                ('Broadcom Inc.', 'AVGO.OQ'),
-                ('Meta Platforms', 'META.OQ'),
-                ('NVIDIA Corporation', 'NVDA.OQ')
-            ]
-            
-            for company, ticker in mbl_tech_stocks:
-                if ticker in text or company.upper() in text.upper():
-                    underlyings.append({
-                        'Name': company,
-                        'Ticker': ticker,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-                    
-        elif issuer_type == 'ubs':
-            # UBS US Tech stocks with Bloomberg codes
-            ubs_tech_stocks = [
-                ('Alphabet Inc', 'GOOG UW'),
-                ('Meta Platforms Inc', 'META UW'),
-                ('Microsoft Corporation', 'MSFT UW'),
-                ('Oracle Corporation', 'ORCL UN')
-            ]
-            
-            for company, bloomberg in ubs_tech_stocks:
-                if company in text or bloomberg in text:
-                    underlyings.append({
-                        'Name': company,
-                        'Bloomberg_Code': bloomberg,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-                    
-        elif issuer_type == 'bnp_paribas':
-            # BNP US Tech stocks with Bloomberg tickers
-            bnp_tech_stocks = [
-                ('Alphabet Inc', 'GOOGL UW'),
-                ('Meta Platforns Inc', 'META UW'),  # Note: typo in original
-                ('NVIDIA Corp', 'NVDA UW'),
-                ('MICROSOFT CORP', 'MSFT UW')
-            ]
-            
-            for company, bloomberg in bnp_tech_stocks:
-                if company in text or bloomberg in text:
-                    underlyings.append({
-                        'Name': company,
-                        'Bloomberg_Code': bloomberg,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-                    
-        elif issuer_type == 'barclays':
-            # Barclays US Tech stocks
-            barclays_tech_stocks = [
-                ('ALPHABET INC-CL A', 'GOOGL UW'),
-                ('MICROSOFT CORP', 'MSFT UW'),
-                ('META PLATFORMS INC-CLASS A', 'META UW'),
-                ('NVIDIA CORP', 'NVDA UW')
-            ]
-            
-            for company, bloomberg in barclays_tech_stocks:
-                if company in text or bloomberg in text:
-                    underlyings.append({
-                        'Name': company,
-                        'Bloomberg_Code': bloomberg,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-                    
-        elif issuer_type == 'natixis':
-            # Natixis European banks
-            natixis_banks = [
-                ('Banco Bilbao Vizcaya Argentaria SA', 'BBVA SQ'),
-                ('Barclays PLC', 'BARC LN'),
-                ('UBS Group AG', 'UBSG SE'),
-                ('Societe Generale SA', 'GLE FP')
-            ]
-            
-            for bank, bloomberg in natixis_banks:
-                if bank in text or bloomberg in text:
-                    underlyings.append({
-                        'Name': bank,
-                        'Bloomberg_Code': bloomberg,
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-        else:
-            # Standard underlying extraction for other issuers
-            stock_patterns = [
-                r'([A-Z][A-Z\s&]+(?:INC|CORP|LTD|CO|GROUP))',
-                r'Bloomberg.*?([A-Z0-9\s]+Equity)',
-                r'Ticker.*?([A-Z]{2,6})'
-            ]
-            
-            for pattern in stock_patterns:
-                matches = re.findall(pattern, text)
-                for match in matches[:4]:  # Limit to 4 underlyings
-                    underlyings.append({
-                        'Name': match.strip(),
-                        'Initial_Price': '',
-                        'Knock_In_Price': '',
-                        'Knock_Out_Price': ''
-                    })
-        
-        # Try to extract prices from tables for all issuers
+        # STEP 1: Extract from tables first (most reliable)
         for table in tables_data:
             if len(table) > 1:
                 headers = [str(cell).upper() if cell else '' for cell in table[0]]
-                # Look for price-related headers
-                if any(keyword in ' '.join(headers) for keyword in ['INITIAL', 'PRICE', 'LEVEL', 'UNDERLYING', 'SPOT']):
+                
+                # Check if this is an underlying assets table
+                if any(keyword in ' '.join(headers) for keyword in ['UNDERLYING', 'ASSET', 'EQUITY', 'SHARE', 'STOCK', 'COMPANY', 'NAME', 'TICKER', 'BLOOMBERG']):
+                    
+                    # Find column indices
+                    name_col = next((i for i, h in enumerate(headers) if any(kw in h for kw in ['NAME', 'COMPANY', 'UNDERLYING'])), -1)
+                    ticker_col = next((i for i, h in enumerate(headers) if any(kw in h for kw in ['TICKER', 'SYMBOL', 'CODE'])), -1)
+                    bloomberg_col = next((i for i, h in enumerate(headers) if 'BLOOMBERG' in h), -1)
+                    initial_col = next((i for i, h in enumerate(headers) if any(kw in h for kw in ['INITIAL', 'SPOT', 'REFERENCE', 'STRIKE'])), -1)
+                    knockin_col = next((i for i, h in enumerate(headers) if any(kw in h for kw in ['KNOCK.*IN', 'BARRIER', 'KICK.*IN'])), -1)
+                    knockout_col = next((i for i, h in enumerate(headers) if any(kw in h for kw in ['KNOCK.*OUT', 'AUTOCALL', 'TRIGGER', 'CALL'])), -1)
+                    
+                    # Extract data from rows
                     for i, row in enumerate(table[1:]):
-                        if row and len(row) > 0 and i < len(underlyings):
-                            # Extract prices based on issuer format
-                            for j, cell in enumerate(row):
-                                if cell and isinstance(cell, str):
-                                    # USD price patterns
-                                    if re.match(r'USD\s*[\d.]+', str(cell)):
-                                        if 'initial' in headers[j].lower() or 'spot' in headers[j].lower():
-                                            underlyings[i]['Initial_Price'] = str(cell)
-                                        elif 'knock' in headers[j].lower() or 'kick' in headers[j].lower():
-                                            underlyings[i]['Knock_In_Price'] = str(cell)
-                                        elif 'call' in headers[j].lower() or 'trigger' in headers[j].lower():
-                                            underlyings[i]['Knock_Out_Price'] = str(cell)
-                                    # EUR/CHF price patterns (for Citi)
-                                    elif re.match(r'(EUR|CHF)\s*[\d.]+', str(cell)):
-                                        if not underlyings[i]['Initial_Price']:
-                                            underlyings[i]['Initial_Price'] = str(cell)
+                        if row and i < 4:  # Max 4 underlyings
+                            underlying = {'Name': '', 'Ticker': '', 'Bloomberg_Code': '', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''}
+                            
+                            if name_col >= 0 and name_col < len(row) and row[name_col]:
+                                underlying['Name'] = str(row[name_col]).strip()
+                            if ticker_col >= 0 and ticker_col < len(row) and row[ticker_col]:
+                                underlying['Ticker'] = str(row[ticker_col]).strip()
+                            if bloomberg_col >= 0 and bloomberg_col < len(row) and row[bloomberg_col]:
+                                underlying['Bloomberg_Code'] = str(row[bloomberg_col]).strip()
+                            if initial_col >= 0 and initial_col < len(row) and row[initial_col]:
+                                underlying['Initial_Price'] = str(row[initial_col]).strip()
+                            if knockin_col >= 0 and knockin_col < len(row) and row[knockin_col]:
+                                underlying['Knock_In_Price'] = str(row[knockin_col]).strip()
+                            if knockout_col >= 0 and knockout_col < len(row) and row[knockout_col]:
+                                underlying['Knock_Out_Price'] = str(row[knockout_col]).strip()
+                            
+                            # If no specific columns found, scan all cells for data
+                            if not underlying['Name'] and not underlying['Ticker']:
+                                for j, cell in enumerate(row):
+                                    if cell and isinstance(cell, str):
+                                        cell_str = str(cell).strip()
+                                        # Company name patterns
+                                        if re.match(r'^[A-Z][a-zA-Z\s&\.\-]+(?:Inc|Corp|Ltd|PLC|Co|Group|SA|AG|NV|Corporation|Limited)\.?$', cell_str):
+                                            underlying['Name'] = cell_str
+                                        # Ticker patterns
+                                        elif re.match(r'^[A-Z]{2,6}(?:\.[A-Z]{1,3})?$', cell_str):
+                                            underlying['Ticker'] = cell_str
+                                        # Bloomberg patterns
+                                        elif re.match(r'^[A-Z0-9]{2,6}\s+[A-Z]{2}$', cell_str):
+                                            underlying['Bloomberg_Code'] = cell_str
+                                        # Price patterns
+                                        elif re.match(r'(?:USD|EUR|GBP|AUD|CHF)?\s*[\d.,]+', cell_str):
+                                            if not underlying['Initial_Price']:
+                                                underlying['Initial_Price'] = cell_str
+                            
+                            # Only add if we found meaningful data
+                            if underlying['Name'] or underlying['Ticker'] or underlying['Bloomberg_Code']:
+                                underlyings.append(underlying)
         
-        return underlyings[:4]  # Limit to 4 underlyings
+        # STEP 2: If table extraction didn't work, use text patterns
+        if not underlyings:
+            # Enhanced text-based extraction patterns
+            patterns = [
+                r'([A-Z][a-zA-Z\s&\.\-]+(?:Inc|Corp|Ltd|PLC|Co|Group|SA|AG|NV|Corporation|Limited)\.?)\s*[\(\[]?([A-Z]{2,6}(?:\.[A-Z]{1,3})?)[\)\]]?',  # Company (TICKER)
+                r'([A-Z]{2,6}(?:\.[A-Z]{1,3})?)\s+([A-Z][a-zA-Z\s&\.\-]+(?:Inc|Corp|Ltd|PLC|Co|Group|SA|AG|NV|Corporation|Limited)\.?)',  # TICKER Company
+                r'Bloomberg[:\s]*([A-Z0-9]{2,6}\s+[A-Z]{2})',  # Bloomberg: CODE XX
+                r'Ticker[:\s]*([A-Z]{2,6}(?:\.[A-Z]{1,3})?)',  # Ticker: XXXX
+                r'Underlying[:\s]*([A-Z][a-zA-Z\s&\.\-]+)',  # Underlying: Company
+            ]
+            
+            found_companies = []
+            for pattern in patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                for match in matches:
+                    if isinstance(match, tuple) and len(match) == 2:
+                        # Determine company vs ticker
+                        if re.match(r'^[A-Z]{2,6}(?:\.[A-Z]{1,3})?$', match[0]):  # First is ticker
+                            found_companies.append({'Name': match[1], 'Ticker': match[0]})
+                        else:  # First is company
+                            found_companies.append({'Name': match[0], 'Ticker': match[1]})
+                    else:
+                        if re.match(r'^[A-Z]{2,6}(?:\.[A-Z]{1,3})?$', match):  # Is ticker
+                            found_companies.append({'Name': '', 'Ticker': match})
+                        else:  # Is company
+                            found_companies.append({'Name': match, 'Ticker': ''})
+            
+            # Deduplicate and format
+            seen = set()
+            for company in found_companies:
+                key = (company.get('Name', ''), company.get('Ticker', ''))
+                if key not in seen and (company.get('Name') or company.get('Ticker')):
+                    seen.add(key)
+                    underlyings.append({
+                        'Name': company.get('Name', ''),
+                        'Ticker': company.get('Ticker', ''),
+                        'Bloomberg_Code': '',
+                        'Initial_Price': '',
+                        'Knock_In_Price': '',
+                        'Knock_Out_Price': ''
+                    })
+                    if len(underlyings) >= 4:
+                        break
+        
+        # STEP 3: Extract prices from separate price tables
+        price_patterns = [
+            r'Initial.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Spot.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Strike.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Barrier.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Knock.*In.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Knock.*Out.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)',
+            r'Autocall.*?(?:USD|EUR|GBP|AUD|CHF)?\s*([\d.,]+)'
+        ]
+        
+        # Try to extract prices for each underlying
+        for i, underlying in enumerate(underlyings):
+            for pattern in price_patterns:
+                matches = re.findall(pattern, text, re.IGNORECASE)
+                if matches and i < len(matches):
+                    if 'Initial' in pattern or 'Spot' in pattern or 'Strike' in pattern:
+                        if not underlying['Initial_Price']:
+                            underlying['Initial_Price'] = matches[i]
+                    elif 'Barrier' in pattern or 'Knock.*In' in pattern:
+                        if not underlying['Knock_In_Price']:
+                            underlying['Knock_In_Price'] = matches[i]
+                    elif 'Knock.*Out' in pattern or 'Autocall' in pattern:
+                        if not underlying['Knock_Out_Price']:
+                            underlying['Knock_Out_Price'] = matches[i]
+        
+        # STEP 4: Fallback to issuer-specific patterns if still no data
+        if not underlyings:
+            if issuer_type == 'macquarie':
+                # Look for MBL-specific patterns
+                tech_patterns = [
+                    r'(Oracle Corporation|ORCL)',
+                    r'(Broadcom Inc|AVGO)',
+                    r'(Meta Platforms|META)',
+                    r'(NVIDIA Corporation|NVDA)',
+                    r'(Microsoft Corporation|MSFT)',
+                    r'(Alphabet Inc|GOOG|GOOGL)'
+                ]
+                
+                for pattern in tech_patterns:
+                    match = re.search(pattern, text, re.IGNORECASE)
+                    if match:
+                        company_name = match.group(1)
+                        if 'Oracle' in company_name:
+                            underlyings.append({'Name': 'Oracle Corporation', 'Ticker': 'ORCL', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+                        elif 'Broadcom' in company_name:
+                            underlyings.append({'Name': 'Broadcom Inc', 'Ticker': 'AVGO', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+                        elif 'Meta' in company_name:
+                            underlyings.append({'Name': 'Meta Platforms', 'Ticker': 'META', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+                        elif 'NVIDIA' in company_name:
+                            underlyings.append({'Name': 'NVIDIA Corporation', 'Ticker': 'NVDA', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+                        elif 'Microsoft' in company_name:
+                            underlyings.append({'Name': 'Microsoft Corporation', 'Ticker': 'MSFT', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+                        elif 'Alphabet' in company_name:
+                            underlyings.append({'Name': 'Alphabet Inc', 'Ticker': 'GOOG', 'Initial_Price': '', 'Knock_In_Price': '', 'Knock_Out_Price': ''})
+        
+        return underlyings[:4]  # Ensure maximum 4 underlyings
 
     def extract_termsheet_data(self, pdf_path):
-        """Main extraction function"""
+        """Main extraction function with comprehensive field extraction"""
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 full_text = ""
@@ -770,23 +778,157 @@ class FixedIncomeTermsheetExtractor:
         extracted['Issuer'] = issuer_config['issuer_name']
         extracted['CCY'] = self.extract_currency(full_text, issuer_type)
         extracted['Notional Value'] = self.extract_notional_amount(full_text, issuer_type)
+        extracted['extracted_text'] = full_text  # Store full text for further extraction
         
-        # Extract underlying assets
+        # Extract comprehensive date information
+        extracted.update(self.extract_comprehensive_dates(full_text, issuer_type))
+        
+        # Extract underlying assets with prices
         underlying_assets = self.extract_underlying_assets(full_text, tables_data, issuer_type)
+        extracted['underlying_assets'] = underlying_assets
         
-        # Extract dates more intelligently
-        dates_found = extracted.get('dates_found', [])
-        if dates_found:
-            extracted['Issue Date'] = f"{dates_found[0][0]}/{dates_found[0][1]}/{dates_found[0][2]}" if dates_found else ''
-            extracted['Strike Date'] = f"{dates_found[1][0]}/{dates_found[1][1]}/{dates_found[1][2]}" if len(dates_found) > 1 else ''
-            extracted['Maturity Date'] = f"{dates_found[-1][0]}/{dates_found[-1][1]}/{dates_found[-1][2]}" if dates_found else ''
+        # Extract all barrier and trigger levels
+        extracted.update(self.extract_barriers_and_triggers(full_text, issuer_type))
+        
+        # Extract valuation/observation dates
+        extracted['valuation_dates'] = self.extract_valuation_dates(full_text, tables_data, issuer_type)
+        
+        # Extract product details
+        extracted.update(self.extract_product_details(full_text, issuer_type))
         
         # Add metadata
         extracted['Source_File'] = os.path.basename(pdf_path)
         extracted['Detected_Issuer_Type'] = issuer_type
-        extracted['underlying_assets'] = underlying_assets
         
         return extracted
+
+    def extract_comprehensive_dates(self, text, issuer_type):
+        """Extract all date information from termsheet"""
+        dates = {}
+        
+        # Common date patterns
+        date_patterns = [
+            r'Issue Date[:\s]+(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
+            r'Strike Date[:\s]+(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
+            r'Maturity Date[:\s]+(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
+            r'Final Observation Date[:\s]+(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
+            r'Initial Observation Date[:\s]+(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})'
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                date_str = f"{match.group(1)}/{match.group(2)}/{match.group(3)}"
+                if 'Issue' in pattern:
+                    dates['Issue Date'] = date_str
+                elif 'Strike' in pattern:
+                    dates['Strike Date'] = date_str
+                elif 'Maturity' in pattern:
+                    dates['Maturity Date'] = date_str
+        
+        return dates
+
+    def extract_barriers_and_triggers(self, text, issuer_type):
+        """Extract barrier levels and trigger percentages"""
+        barriers = {}
+        
+        # Barrier patterns
+        barrier_patterns = [
+            r'Knock[- ]?In[:\s]+(\d+(?:\.\d+)?)%',
+            r'Knock[- ]?Out[:\s]+(\d+(?:\.\d+)?)%',
+            r'Barrier[:\s]+(\d+(?:\.\d+)?)%',
+            r'Trigger[:\s]+(\d+(?:\.\d+)?)%',
+            r'Autocall[:\s]+(\d+(?:\.\d+)?)%',
+            r'Memory[:\s]+(\d+(?:\.\d+)?)%'
+        ]
+        
+        for pattern in barrier_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = float(match.group(1)) / 100  # Convert to decimal
+                if 'Knock.*In' in pattern or 'Barrier' in pattern:
+                    barriers['Knock-In%'] = value
+                elif 'Knock.*Out' in pattern or 'Autocall' in pattern or 'Trigger' in pattern:
+                    barriers['Knock-Out%'] = value
+        
+        return barriers
+
+    def extract_valuation_dates(self, text, tables_data, issuer_type):
+        """Extract observation/valuation dates from termsheet"""
+        valuation_dates = []
+        
+        # Look for valuation date tables
+        for table in tables_data:
+            if len(table) > 1:
+                headers = [str(cell).upper() if cell else '' for cell in table[0]]
+                # Check if this is a valuation dates table
+                if any(keyword in ' '.join(headers) for keyword in ['OBSERVATION', 'VALUATION', 'COUPON', 'DATE']):
+                    for row in table[1:]:
+                        if row:
+                            for cell in row:
+                                if cell and isinstance(cell, str):
+                                    # Look for date patterns
+                                    date_match = re.search(r'(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})', str(cell))
+                                    if date_match:
+                                        date_str = f"{date_match.group(1)}/{date_match.group(2)}/{date_match.group(3)}"
+                                        if date_str not in valuation_dates:
+                                            valuation_dates.append(date_str)
+        
+        # If no table found, extract from text patterns
+        if not valuation_dates:
+            # Look for quarterly date patterns
+            quarterly_patterns = [
+                r'(\d{1,2})[\/\-\s](\d{1,2})[\/\-\s](\d{4})',
+            ]
+            
+            for pattern in quarterly_patterns:
+                matches = re.findall(pattern, text)
+                for match in matches:
+                    date_str = f"{match[0]}/{match[1]}/{match[2]}"
+                    # Filter out issue/maturity dates and only include future quarterly dates
+                    if len(valuation_dates) < 12 and date_str not in valuation_dates:
+                        valuation_dates.append(date_str)
+        
+        return valuation_dates[:12]  # Limit to 12 valuation dates
+
+    def extract_product_details(self, text, issuer_type):
+        """Extract detailed product information"""
+        details = {}
+        
+        # Product type patterns
+        product_patterns = [
+            r'(Phoenix Coupon Note|PCN)',
+            r'(Autocallable|ACE)',
+            r'(Memory Coupon)',
+            r'(Barrier Reverse Convertible)',
+            r'Product Type[:\s]+([A-Za-z\s\d%]+)',
+            r'Structure[:\s]+([A-Za-z\s\d%]+)'
+        ]
+        
+        for pattern in product_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                details['Product_Type'] = match.group(1) if match.group(1) else match.group(0)
+                break
+        
+        # Extract additional details
+        detail_patterns = {
+            'Investment_Amount': r'Investment Amount[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'Principal_Amount': r'Principal Amount[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'Revenue': r'Revenue[:\s]+(?:AUD|USD|EUR|GBP)?\s*([0-9,]+(?:\.[0-9]{2})?)',
+            'Management_Fee': r'Management Fee[:\s]+(\d+(?:\.\d+)?)%',
+            'UF%': r'UF[:\s]+(\d+(?:\.\d+)?)%'
+        }
+        
+        for key, pattern in detail_patterns.items():
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                if '%' in pattern:
+                    details[key] = float(match.group(1)) / 100  # Convert to decimal
+                else:
+                    details[key] = float(match.group(1).replace(',', ''))
+        
+        return details
 
 def create_database_row(data):
     """Create database row with proper formatting matching the CSV sample exactly"""
